@@ -1,0 +1,151 @@
+---
+title: "Project-Heart Disease Prediction"
+author: "Chaoying Luo, Yiyang Sheng, Ying Liu, Ruitong Liu, Bo Yang"
+date: "2021/4/29"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse) 
+library(ggplot2) 
+library(caret) # Machine learning
+library(caTools)
+library(gridExtra)   
+library(grid)        
+library(pROC)
+```
+
+
+```{r}
+data = read.csv("test.csv")
+data = data[,-1]
+head(data,6)
+
+# correct the data type
+data$Sex_male = as.factor(data$Sex_male)
+data$currentSmoker = as.factor(data$currentSmoker)
+data$BPMeds = as.factor(data$BPMeds)
+data$prevalentStroke = as.factor(data$prevalentStroke)
+data$prevalentHyp = as.factor(data$prevalentHyp)
+data$diabetes = as.factor(data$diabetes)
+data$TenYearCHD = as.factor(data$TenYearCHD)
+str(data)
+```
+
+
+```{r}
+# split the data into training set and test set
+set.seed(123)
+split_data = sample.split(data$TenYearCHD, SplitRatio = 0.7)
+training_data = data[split_data==T,]
+test_data = data[split_data==F,]
+nrow(training_data)
+nrow(test_data)
+```
+
+```{r}
+# run logitic regression
+logistic_model = glm(TenYearCHD~., data = training_data, family = "binomial")
+summary(logistic_model)
+```
+
+Significant variables include Sex_male, age, cigsPerDay, prevalentStroke, sysBP, and glucose. We can run logitic regression again with these significant variables.
+
+```{r}
+# run logitic regression again with significant variables
+logistic_model_new = glm(TenYearCHD~Sex_male+age+cigsPerDay+prevalentStroke+sysBP+glucose, data = training_data, family = "binomial")
+summary(logistic_model_new)
+```
+
+```{r}
+# predict TenYearCHD on test data
+pred_model =  predict(logistic_model,newdata = test_data[,-15],type = "response")
+summary(pred_model)
+
+pred_test_data = ifelse(pred_model>0.5,1,0)
+```
+
+```{r}
+cm = confusionMatrix(pred_test_data, test_data$TenYearCHD)
+cm$table
+
+# extract the confusion matrix values as data.frame
+cm_d = as.data.frame(cm$table)
+# confusion matrix statistics as data.frame
+cm_st = data.frame(cm$overall)
+# round the values
+cm_st$cm.overall = round(cm_st$cm.overall,2)
+
+# here we also have the rounded percentage values
+cm_p = as.data.frame(prop.table(cm$table))
+cm_d$Perc = round(cm_p$Freq*100,2)
+
+# plotting the matrix
+cm_d_p =  ggplot(data = cm_d, aes(x = Prediction , y =  Reference, fill = Freq))+
+  geom_tile() +
+  geom_text(aes(label = paste("",Freq,",",Perc,"%")), color = 'red', size = 5) +
+  theme_light() +
+  guides(fill=FALSE) 
+
+# plotting the stats
+cm_st_p =  tableGrob(cm_st)
+
+# all together
+grid.arrange(cm_d_p, cm_st_p,nrow = 1, ncol = 2, 
+             top=textGrob("Confusion Matrix and Statistics",gp=gpar(fontsize=20,font=1)))
+# evaluation
+confusion_matrix = table(pred_test_data,test_data$TenYearCHD)
+acc = (sum(diag(confusion_matrix))/sum(confusion_matrix))*100
+paste("Overall accuracy with threshold 0.5 is",acc,"%")
+
+# roc
+pROC_obj = roc(test_data$TenYearCHD,pred_model, 
+               smoothed = TRUE,
+               # arguments for ci
+               ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+               # arguments for plot
+               plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+               print.auc=TRUE, show.thres=TRUE)
+```
+
+Though the accuracy is 84.97%, this model is not predicting people who have the risk of heart disease correctly.
+As we care more about people who have chances of heart disease, we can try a different threshold and compute accuracy only for those who have 10 year risk of coronary heart disease.
+
+```{r}
+# threshold = 0.1
+pred_test_data_lowthreshold = factor(ifelse(pred_model>0.1,1,0))
+
+cm = confusionMatrix(pred_test_data_lowthreshold, test_data$TenYearCHD)
+cm$table
+
+# extract the confusion matrix values as data.frame
+cm_d = as.data.frame(cm$table)
+# confusion matrix statistics as data.frame
+cm_st = data.frame(cm$overall)
+# round the values
+cm_st$cm.overall = round(cm_st$cm.overall,2)
+
+# here we also have the rounded percentage values
+cm_p = as.data.frame(prop.table(cm$table))
+cm_d$Perc = round(cm_p$Freq*100,2)
+
+# plotting the matrix
+cm_d_p =  ggplot(data = cm_d, aes(x = Prediction , y =  Reference, fill = Freq))+
+  geom_tile() +
+  geom_text(aes(label = paste("",Freq,",",Perc,"%")), color = 'red', size = 5) +
+  theme_light() +
+  guides(fill=FALSE) 
+
+# plotting the stats
+cm_st_p =  tableGrob(cm_st)
+
+# all together
+grid.arrange(cm_d_p, cm_st_p,nrow = 1, ncol = 2, 
+             top=textGrob("Confusion Matrix and Statistics",gp=gpar(fontsize=20,font=1)))
+
+acc_for_1 = (159/(159+34))*100
+paste("Accuracy for those who have 10 year risk of coronary heart disease with threshold 0.1 is",acc_for_1,"%")
+```
+
+Now as we have a good accuracy for predicting people with chances of heart disease in next 10 years, we can treat them and guide them well in advance.
